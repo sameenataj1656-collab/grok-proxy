@@ -5,20 +5,19 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// UPDATED CORS - Allow Claude.ai and all origins
-const corsOptions = {
-  origin: '*',  // Allow all origins
+// CORS configuration - Allow all origins
+app.use(cors({
+  origin: '*',
   credentials: false,
-  optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-};
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  exposedHeaders: ['Content-Type']
+}));
 
-app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 
-// Add OPTIONS handler for preflight
-app.options('*', cors(corsOptions));
+// Preflight handler
+app.options('*', cors());
 
 // Health check endpoint
 app.get('/', (req, res) => {
@@ -33,27 +32,35 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    cors: 'enabled'
+  });
 });
 
 // Main proxy endpoint for Grok API
 app.post('/api/chat', async (req, res) => {
   try {
+    console.log('Received chat request');
+    
     const { messages, model, temperature, max_tokens, apiKey } = req.body;
 
     if (!apiKey || !apiKey.startsWith('gsk_')) {
+      console.log('Invalid API key');
       return res.status(400).json({ 
         error: 'Invalid API key format. Must start with gsk_' 
       });
     }
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      console.log('Invalid messages');
       return res.status(400).json({ 
         error: 'Messages array is required and must not be empty' 
       });
     }
 
-    console.log(`[${new Date().toISOString()}] Processing chat request`);
+    console.log(`Processing request with ${messages.length} messages`);
 
     const response = await axios.post(
       'https://api.x.ai/v1/chat/completions',
@@ -73,11 +80,11 @@ app.post('/api/chat', async (req, res) => {
       }
     );
 
+    console.log('Grok API response received');
     res.json(response.data);
-    console.log(`[${new Date().toISOString()}] Success!`);
 
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Error:`, error.response?.data || error.message);
+    console.error('Error:', error.response?.data || error.message);
     
     if (error.response) {
       res.status(error.response.status).json({
@@ -86,7 +93,7 @@ app.post('/api/chat', async (req, res) => {
       });
     } else if (error.request) {
       res.status(503).json({
-        error: 'No response from Grok API',
+        error: 'No response from Grok API. Service may be unavailable.',
         details: error.message
       });
     } else {
@@ -98,8 +105,16 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ 
+    error: 'Internal server error', 
+    message: err.message 
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Grok API Proxy Server running on port ${PORT}`);
-  console.log(`📍 Local: http://localhost:${PORT}`);
+  console.log(`📍 CORS enabled for all origins`);
 });
-     
